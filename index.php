@@ -337,18 +337,8 @@ $db = $database->getConnection();
 .btn-pagamento:hover {
     background: #138496;
 }
-.produto-info{
-    margin-top: 110px; /* Baixa o card 30px */
-    /* Mantenha os outros estilos que já existem */
-    background: white;
-    border-radius: 15px;
- 
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-    transition: all 0.3s ease;
-}
-.produto-card{
-     margin-top: 110px;
-}
+
+
 </style>
 </head>
 <body>
@@ -363,6 +353,7 @@ $db = $database->getConnection();
                 <li><a href="#contato">Contato</a></li>
             </ul>
             <a href="login.php" class="btn-admin">🔧 Área Admin</a>
+          
         </nav>
     </header>
 

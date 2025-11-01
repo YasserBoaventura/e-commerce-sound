@@ -1275,7 +1275,8 @@ try {
                 <li><a href="#gerenciarMarcas">Marcas</a></li>
                 <li><a href="#vendas">Relatórios</a></li>
                 <li><a href="index.php">Ver Loja</a></li>
-                <li><a href="admin.php?logout=true">Sair (<?php echo $_SESSION['admin_usuario']; ?>)</a></li>
+                <li><a href="funcionario.php"> Atendimento</a></li>
+                <li><a href="login.php">Sair (<?php echo $_SESSION['admin_usuario']; ?>)</a></li>
             </ul>
             <?php endif; ?>
         </nav>

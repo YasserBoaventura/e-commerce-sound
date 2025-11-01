@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['usuario'])) {
                 $_SESSION['admin_usuario'] = $usuario;
                 header("Location: admin.php");
                 exit;
-            } else {
+            } else {            
                 $erro_login = "Senha incorreta!";
             }
         } else {
@@ -193,7 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['usuario'])) {
         <form method="POST" class="admin-form">
             <div class="form-group">
                 <label>👤 Usuário:</label>
-                <input type="text" name="usuario" value="admin" required 
+                <input type="text" name="usuario" value="" required 
                        placeholder="Digite seu usuário">
             </div>
             
