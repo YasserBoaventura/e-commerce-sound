@@ -520,6 +520,7 @@ foreach ($contatos as $contato) {
 <?php endif; ?>
 
 <!-- Filtros -->
+ 
 <form method="GET" class="filters">
   <div class="filter-group">
       <label>Status</label>
@@ -561,7 +562,6 @@ foreach ($contatos as $contato) {
   <a href="funcionario.php" class="btn" style="background: #95a5a6;">🔄 Limpar</a>
 
 </form>
-
 <!-- Estatísticas -->
 <div class="stats">
   <div class="stat-card pendente">
@@ -612,7 +612,7 @@ foreach ($contatos as $contato) {
               <td>
                   <div><?php echo htmlspecialchars($contato['email']); ?></div>
                   <small><?php echo $contato['telefone'] ? htmlspecialchars($contato['telefone']) : 'Não informado'; ?></small>
-              </td>
+              </td>          
               <td><?php echo formatarAssunto($contato['assunto']); ?></td>
               <td><span class="prioridade-badge prioridade-<?php echo $contato['prioridade']; ?>"><?php echo formatarPrioridade($contato['prioridade']); ?></span></td>
               <td><span class="status-badge status-<?php echo $contato['status']; ?>"><?php echo formatarStatus($contato['status']); ?></span></td>

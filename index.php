@@ -2,7 +2,6 @@
 session_start();
 require_once 'config/database.php';
 
-
 $database = new Database();
 $db = $database->getConnection();
 ?>
@@ -10,7 +9,7 @@ $db = $database->getConnection();
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=0.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Som Automotivo Premium - Sua Loja de Som Profissional</title>
     <link rel="stylesheet" href="style.css">
     <style>
@@ -265,6 +264,10 @@ $db = $database->getConnection();
     font-weight: 600;
 }
 
+.produto-info{
+    text-align: left;
+    margin-left: 15px; /* Ajuste o valor conforme necessário */
+}
 .btn-finalizar:hover {
     background: #218838;
 }
@@ -365,81 +368,116 @@ $db = $database->getConnection();
     </section>
 
     <!-- Produtos em Destaque -->
- 
 <section id="produtos" class="produtos-section">
     <h2 class="section-title">🎯 Produtos em Destaque</h2>
     <div class="produtos-grid">
         <?php
-      $query = "SELECT p.*, c.nome as categoria_nome, m.nome as marca_nome 
-          FROM produtos p 
-          LEFT JOIN categorias c ON p.categoria_id = c.id 
-          LEFT JOIN marcas m ON p.marca_id = m.id 
-          WHERE p.destaque = TRUE 
-          ORDER BY p.data_cadastro DESC";
+        // Query para buscar produtos em destaque com especificações
+        $query = "SELECT p.*, c.nome as categoria_nome, m.nome as marca_nome 
+                  FROM produtos p 
+                  LEFT JOIN categorias c ON p.categoria_id = c.id 
+                  LEFT JOIN marcas m ON p.marca_id = m.id 
+                  WHERE p.destaque = TRUE AND p.ativo = TRUE
+                  ORDER BY p.data_cadastro DESC";
         $stmt = $db->prepare($query);
         $stmt->execute();
         
-        while ($produto = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $preco_formatado = number_format($produto['preco'], 2, ',', '.');
-            $preco_original_formatado = $produto['preco_original'] ? number_format($produto['preco_original'], 2, ',', '.') : '';
-            $desconto = $produto['preco_original'] ? round((($produto['preco_original'] - $produto['preco']) / $produto['preco_original']) * 100) : 0;
-            
-            
+        if ($stmt->rowCount() > 0) {
+            while ($produto = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $preco_formatado = number_format($produto['preco'], 2, ',', '.');
+                $preco_original_formatado = $produto['preco_original'] ? number_format($produto['preco_original'], 2, ',', '.') : '';
+                $desconto = $produto['preco_original'] ? round((($produto['preco_original'] - $produto['preco']) / $produto['preco_original']) * 100) : 0;
+                
+                // Buscar especificações do produto
+                $query_espec = "SELECT tipo_especificacao, valor, unidade 
+                               FROM especificacoes_produto 
+                               WHERE produto_id = :produto_id";
+                $stmt_espec = $db->prepare($query_espec);
+                $stmt_espec->bindValue(':produto_id', $produto['id']);
+                $stmt_espec->execute();
+                $especificacoes = $stmt_espec->fetchAll(PDO::FETCH_ASSOC);
+                
+                // Organizar especificações em array associativo
+                $especs = [];
+                foreach ($especificacoes as $espec) {
+                    $especs[$espec['tipo_especificacao']] = [
+                        'valor' => $espec['valor'],
+                        'unidade' => $espec['unidade']
+                    ];
+                }
         ?>
             <div class="produto-card">
                 <div class="produto-imagem">
-    <?php
-    // Verifica se existe imagem no banco de dados E se o arquivo existe
-    if (!empty($produto['imagem']) && file_exists($produto['imagem'])) {
-    echo '<img src="' . $produto['imagem'] . '" alt="' . $produto['nome'] . '" loading="lazy">';
-} else {
-    // Imagem padrão caso não exista
-    echo '<div class="produto-sem-imagem">';
-    echo '<span class="icone-produto">🎵</span>';
-    
-    // Verificar se marca_nome existe e não está vazia
-    if (!empty($produto['marca_nome'])) {
-        echo '<span class="marca-iniciais">' . substr($produto['marca_nome'], 0, 2) . '</span>';
-    } else {
-        // Fallback: usar iniciais do nome do produto
-        $iniciais = !empty($produto['nome']) ? substr($produto['nome'], 0, 2) : 'PD';
-        echo '<span class="marca-iniciais">' . $iniciais . '</span>';
-    }
-    
-    echo '</div>';
-}
-    ?>
-    
-    <?php if($desconto > 0): ?>
-    <div class="badge-desconto">-<?php echo $desconto; ?>%</div>
-    <?php endif; ?>
-</div>
+                    <?php
+                    // Verifica se existe imagem no banco de dados E se o arquivo existe
+                    if (!empty($produto['imagem']) && file_exists($produto['imagem'])) {
+                        echo '<img src="' . $produto['imagem'] . '" alt="' . $produto['nome'] . '" loading="lazy">';
+                    } else {
+                        // Imagem padrão caso não exista
+                        echo '<div class="produto-sem-imagem">';
+                        echo '<span class="icone-produto">🎵</span>';
+
+                        // Verificar se marca_nome existe e não está vazia
+                        if (!empty($produto['marca_nome'])) {
+                            echo '<span class="marca-iniciais">' . substr($produto['marca_nome'], 0, 2) . '</span>';
+                        } else {
+                            // Fallback: usar iniciais do nome do produto
+                            $iniciais = !empty($produto['nome']) ? substr($produto['nome'], 0, 2) : 'PD';
+                            echo '<span class="marca-iniciais">' . $iniciais . '</span>';
+                        }
+                        echo '</div>';
+                    }
+                    ?>
+
+                    <?php if($desconto > 0): ?>
+                        <div class="badge-desconto">-<?php echo $desconto; ?>%</div>
+                    <?php endif; ?>
+                </div>
+                
                 <div class="produto-info">
                     <h3 class="produto-nome"><?php echo $produto['nome']; ?></h3>
                     <div class="produto-preco">
-                        R$ <?php echo $preco_formatado; ?>
+                        MT <?php echo $preco_formatado; ?>
                         <?php if($preco_original_formatado): ?>
-                        <span class="produto-preco-original">De: R$ <?php echo $preco_original_formatado; ?></span>
-                        <?php endif; ?>
+                            <span class="produto-preco-original">De: MT <?php echo $preco_original_formatado; ?></span>
+                        <?php endif; ?>       
                     </div>
                     <p class="produto-descricao"><?php echo substr($produto['descricao'], 0, 100); ?>...</p>
                     <div class="produto-especificacoes">
                         <small><strong>Marca:</strong> <?php echo $produto['marca_nome']; ?></small><br>
-                        <small><strong>Potência:</strong> <?php echo $produto['potencia']; ?></small><br>
-                        <small>  <Strong>Estoque:</Strong> <?php echo $produto['estoque']; ?></small>
+                        <?php if(isset($especs['potencia']) && !empty($especs['potencia']['valor'])): ?>
+                            <small><strong>Potência:</strong> <?php echo $especs['potencia']['valor'] . ' ' . $especs['potencia']['unidade']; ?></small><br>
+                        <?php endif; ?>
+                        <?php if(isset($especs['impedancia']) && !empty($especs['impedancia']['valor'])): ?>
+                            <small><strong>Impedância:</strong> <?php echo $especs['impedancia']['valor'] . ' ' . $especs['impedancia']['unidade']; ?></small><br>
+                        <?php endif; ?>
+                        <?php if(isset($especs['frequencia']) && !empty($especs['frequencia']['valor'])): ?>
+                            <small><strong>Frequência:</strong> <?php echo $especs['frequencia']['valor'] . ' ' . $especs['frequencia']['unidade']; ?></small><br>
+                        <?php endif; ?>
+                        <small><strong>Estoque:</strong> <?php echo $produto['estoque']; ?></small>
                     </div>
-                            <button class="btn-primary btn-comprar" 
-                style="width: 100%; margin-top: 1rem;"
-                data-produto-id="<?php echo $produto['id']; ?>"
-                data-produto-nome="<?php echo $produto['nome']; ?>"
-                data-produto-preco="<?php echo $produto['preco']; ?>">
-            🛒 Comprar Agora
-            </button>
                 </div>
+                
+                <button class="btn-primary btn-comprar" 
+                    style="width: 100%; margin-top: 1rem;"
+                    data-produto-id="<?php echo $produto['id']; ?>"
+                    data-produto-nome="<?php echo $produto['nome']; ?>"
+                    data-produto-preco="<?php echo $produto['preco']; ?>"
+                    data-produto-estoque="<?php echo $produto['estoque']; ?>">
+                    🛒 Comprar Agora
+                </button>
             </div>
-            <?php } ?>
-        </div>
-    </section>
+            <?php 
+            }
+        } else {
+            echo '<div class="empty-state">';
+            echo '<p>📭 Nenhum produto em destaque no momento.</p>';
+            echo '<p>Volte em breve para conferir nossas novidades!</p>';
+            echo '</div>';
+        }
+        ?>
+    </div>
+</section>
 
     <!-- Seção Categorias -->
     <section id="categorias" class="categorias-section">
@@ -480,8 +518,7 @@ $db = $database->getConnection();
                     <h3><?php echo $categoria['nome']; ?></h3>
                     <p><?php echo $categoria['descricao'] ?? 'Produtos de alta qualidade'; ?></p>
                     <div class="categoria-info">
-                       
-                       
+                        <span class="categoria-qtd"><?php echo $total_produtos; ?> produtos</span>
                     </div>
                 </div>
                 <?php 
@@ -499,10 +536,10 @@ $db = $database->getConnection();
         <div class="container">
             <div class="sobre-content">
                 <div class="sobre-texto">
-                    <h2 class="section-title">🏢 Sobre a SomAuto Premium</h2>
-                    <div class="sobre-descricao">
-                        <p>Há mais de <strong>15 anos no mercado</strong>, a SomAuto Premium é referência em som automotivo de alta qualidade. Nossa missão é proporcionar a melhor experiência sonora para nossos clientes, com produtos de primeira linha e atendimento especializado.</p>
-                        
+    <h2 class="section-title">🏢 Sobre a SomAuto Premium</h2>
+    <div class="sobre-descricao">
+        <p>Há mais de <strong>15 anos no mercado</strong>, a SomAuto Premium é referência em som automotivo de alta qualidade. Nossa missão é proporcionar a melhor experiência sonora para nossos clientes, com produtos de primeira linha e atendimento especializado.</p>
+        
                         <div class="sobre-vantagens">
                             <div class="vantagem-item">
                                 <span class="vantagem-icone">✅</span>
@@ -588,7 +625,7 @@ $db = $database->getConnection();
                         <div class="info-icone">✉️</div>
                         <div class="info-texto">
                             <h4>E-mail</h4>
-                            <p>vendas@somautopremium.com.br<br>suporte@somautopremium.com.br</p>
+                            <p>vendas@somautopremium.com.Mz<br>suporte@somautopremium.com.Mz</p>
                         </div>
                     </div>
                     <div class="info-item">
@@ -671,9 +708,6 @@ $db = $database->getConnection();
         </div>
     </footer>
 
-    
-
-
     <!-- Modal do Carrinho -->
 <div id="modalCarrinho" class="modal-carrinho">
     <div class="modal-carrinho-content">
@@ -682,7 +716,7 @@ $db = $database->getConnection();
         
         <div id="modalProdutoInfo">
             <h4 id="modalProdutoNome"></h4>
-            <p>Preço: R$ <span id="modalProdutoPreco"></span></p>
+            <p>Preço: MT <span id="modalProdutoPreco"></span></p>
         </div>
         
         <div class="quantidade-group">
@@ -695,7 +729,7 @@ $db = $database->getConnection();
         </div>
         
         <div class="total-group">
-            <strong>Total: R$ <span id="modalTotal">0.00</span></strong>
+            <strong>Total: MT <span id="modalTotal">0.00</span></strong>
         </div>
         
         <button id="btnAdicionarCarrinho" class="btn-success">
@@ -704,7 +738,6 @@ $db = $database->getConnection();
     </div>
 </div>
 
-
 <!-- Carrinho Flutuante -->
 <div id="carrinhoFlutuante">
     <div class="carrinho-header">
@@ -712,7 +745,7 @@ $db = $database->getConnection();
         <span id="carrinhoCount">0</span>
     </div>
     <div id="carrinhoItens"></div>
-    <div class="carrinho-total" id="carrinhoTotal">Total: R$ 0.00</div>
+    <div class="carrinho-total" id="carrinhoTotal">Total: MT 0.00</div>
     <button id="btnFinalizarCompra" class="btn-finalizar">💰 Finalizar Compra</button>
 </div>
 
@@ -724,10 +757,10 @@ $db = $database->getConnection();
         
         <div id="resumoCarrinho">
             <!-- Itens do carrinho aparecerão aqui -->
-        </div>
+        </div> 
         
         <div class="total-final">
-            Total da Compra: R$ <span id="totalCompra">0.00</span>
+            Total da Compra: MT <span id="totalCompra">0.00</span>
         </div>
         
         <div class="form-cliente">
@@ -743,12 +776,43 @@ $db = $database->getConnection();
                 </div>
                 <div class="form-group">
                     <label>Telefone:</label>
-                    <input type="tel" name="telefone" placeholder="(11) 99999-9999" required>
+                    <input type="tel" name="telefone" placeholder="+258 8...." required>
                 </div>
                 <div class="form-group">
                     <label>Endereço:</label>
                     <input type="text" name="endereco" placeholder="Rua, número, bairro" required>
                 </div>
+                <div class="metodos-pagamento">
+    <h4>💳 Método de Pagamento</h4>
+    <div class="pagamento-options">
+        <div class="pagamento-option">
+            <input type="radio" id="e-mola" name="metodo_pagamento" value="E-mola" required>
+            <label for="e-mola">
+                <span class="pagamento-icone e-mola">📲</span>
+                <span class="pagamento-nome">e-Mola</span>
+                <span class="pagamento-desc">Pagamento móvel</span>
+            </label>
+        </div>
+        
+        <div class="pagamento-option">
+            <input type="radio" id="mpesa" name="metodo_pagamento" value="M-Pesa" required>
+            <label for="mpesa">
+                <span class="pagamento-icone mpesa">💸</span>
+                <span class="pagamento-nome">M-Pesa</span>
+                <span class="pagamento-desc">Dinheiro móvel</span>
+            </label>
+        </div>
+        
+        <div class="pagamento-option">
+            <input type="radio" id="bim" name="metodo_pagamento" value="BIM" required>
+            <label for="bim">
+                <span class="pagamento-icone bim">🏛️</span>
+                <span class="pagamento-nome">BIM</span>
+                <span class="pagamento-desc">Banco BIM</span>
+            </label>
+        </div>
+    </div>
+</div>
             </form>
         </div>
         

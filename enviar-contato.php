@@ -47,7 +47,7 @@ try {
             ':mensagem' => $mensagem,
             ':prioridade' => $prioridade
         ]);
-
+                              
         if ($result) {
             $_SESSION['form_success'] = 'Mensagem enviada com sucesso! Entraremos em contato em breve.';
             header('Location: ' . $_SERVER['HTTP_REFERER']);

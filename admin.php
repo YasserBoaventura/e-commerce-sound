@@ -8,8 +8,9 @@ $db = $database->getConnection();
 $erro_login = '';
 $sucesso = '';
 $produto_editando = null;
+$marca_editando = null;
 
-// 🔍 VERIFICAR SE ESTÁ EDITANDO UM PRODUTO
+// 🔍 VERIFICAR SE ESTÁ EDITANDO UM PRODUTO (ESTRUTURA 3FN)
 if (isset($_GET['editar']) && isset($_SESSION['admin_logado']) && $_SESSION['admin_logado']) {
     try {
         $query = "SELECT p.*, m.nome as marca_nome 
@@ -22,6 +23,20 @@ if (isset($_GET['editar']) && isset($_SESSION['admin_logado']) && $_SESSION['adm
         
         if ($stmt->rowCount() > 0) {
             $produto_editando = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            // Buscar especificações do produto
+            $query_espec = "SELECT tipo_especificacao, valor, unidade 
+                           FROM especificacoes_produto 
+                           WHERE produto_id = :produto_id";
+            $stmt_espec = $db->prepare($query_espec);
+            $stmt_espec->bindParam(':produto_id', $produto_editando['id']);
+            $stmt_espec->execute();
+            $especificacoes = $stmt_espec->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Adicionar especificações ao array do produto
+            foreach ($especificacoes as $espec) {
+                $produto_editando[$espec['tipo_especificacao']] = $espec['valor'];
+            }
         } else {
             $erro_login = "Produto não encontrado!";
         }
@@ -30,10 +45,35 @@ if (isset($_GET['editar']) && isset($_SESSION['admin_logado']) && $_SESSION['adm
     }
 }
 
+// 🔍 VERIFICAR SE ESTÁ EDITANDO UMA MARCA
+if (isset($_GET['editar_marca']) && isset($_SESSION['admin_logado']) && $_SESSION['admin_logado']) {
+    try {
+        $query = "SELECT * FROM marcas WHERE id = :id";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':id', $_GET['editar_marca']);
+        $stmt->execute();
+        
+        if ($stmt->rowCount() > 0) {
+            $marca_editando = $stmt->fetch(PDO::FETCH_ASSOC);
+        } else {
+            $erro_login = "Marca não encontrada!";
+        }
+    } catch (PDOException $e) {
+        $erro_login = "Erro ao buscar marca: " . $e->getMessage();
+    }
+}
+
 // ❌ CANCELAR EDIÇÃO
 if (isset($_GET['cancelar_edicao'])) {
     $produto_editando = null;
     header("Location: admin.php");
+    exit;
+}
+
+// ❌ CANCELAR EDIÇÃO DE MARCA
+if (isset($_GET['cancelar_edicao_marca'])) {
+    $marca_editando = null;
+    header("Location: admin.php#gerenciarMarcas");
     exit;
 }
 
@@ -67,7 +107,7 @@ function fazerUploadImagem($file, $produto_id) {
     return null;
 }
 
-// ✅ CRUD - CRIAR PRODUTO
+// ✅ CRUD - CRIAR PRODUTO (ESTRUTURA 3FN)
 if (isset($_POST['criar_produto']) && isset($_SESSION['admin_logado']) && $_SESSION['admin_logado']) {
     try {
         $imagem_path = '';
@@ -109,37 +149,75 @@ if (isset($_POST['criar_produto']) && isset($_SESSION['admin_logado']) && $_SESS
             $marca_id = $db->lastInsertId();
         }
         
-        // Preparar os dados manualmente
-        $dados = [
-            ':nome' => $_POST['nome'],
-            ':descricao' => $_POST['descricao'],
-            ':preco' => $_POST['preco'],
-            ':preco_original' => !empty($_POST['preco_original']) ? $_POST['preco_original'] : null,
-            ':estoque' => $_POST['estoque'],
-            ':categoria_id' => $_POST['categoria_id'],
-            ':marca_id' => $marca_id,
-            ':modelo' => $_POST['modelo'],
-            ':potencia' => $_POST['potencia'],
-            ':impedancia' => $_POST['impedancia'],
-            ':frequencia' => $_POST['frequencia'],
-            ':imagem' => $imagem_path,
-            ':destaque' => isset($_POST['destaque']) ? 1 : 0
-        ];
+        // Iniciar transação para garantir consistência
+        $db->beginTransaction();
         
-        $query = "INSERT INTO produtos (nome, descricao, preco, preco_original, estoque, categoria_id, marca_id, modelo, potencia, impedancia, frequencia, imagem, destaque) 
-                  VALUES (:nome, :descricao, :preco, :preco_original, :estoque, :categoria_id, :marca_id, :modelo, :potencia, :impedancia, :frequencia, :imagem, :destaque)";
-        
-        $stmt = $db->prepare($query);
-        $stmt->execute($dados);
-        
-        $sucesso = "✅ Produto cadastrado com sucesso!" . ($imagem_path ? " 📸 Imagem salva!" : "");
+        try {
+            // Dados do produto principal (sem especificações)
+            $dados_produto = [
+                ':nome' => $_POST['nome'],
+                ':descricao' => $_POST['descricao'],
+                ':preco' => $_POST['preco'],
+                ':preco_original' => !empty($_POST['preco_original']) ? $_POST['preco_original'] : null,
+                ':estoque' => $_POST['estoque'],
+                ':categoria_id' => $_POST['categoria_id'],
+                ':marca_id' => $marca_id,
+                ':modelo' => $_POST['modelo'],
+                ':imagem' => $imagem_path,
+                ':destaque' => isset($_POST['destaque']) ? 1 : 0
+            ];
+            
+            // Inserir produto principal
+            $query_produto = "INSERT INTO produtos (nome, descricao, preco, preco_original, estoque, categoria_id, marca_id, modelo, imagem, destaque) 
+                             VALUES (:nome, :descricao, :preco, :preco_original, :estoque, :categoria_id, :marca_id, :modelo, :imagem, :destaque)";
+            
+            $stmt_produto = $db->prepare($query_produto);
+            $stmt_produto->execute($dados_produto);
+            $produto_id = $db->lastInsertId();
+            
+            // Inserir especificações na tabela separada
+            $especificacoes = [
+                ['tipo' => 'potencia', 'valor' => $_POST['potencia'], 'unidade' => 'W'],
+                ['tipo' => 'impedancia', 'valor' => $_POST['impedancia'], 'unidade' => 'Ω'],
+                ['tipo' => 'frequencia', 'valor' => $_POST['frequencia'], 'unidade' => 'Hz']
+            ];
+            
+            $query_espec = "INSERT INTO especificacoes_produto (produto_id, tipo_especificacao, valor, unidade) 
+                           VALUES (:produto_id, :tipo, :valor, :unidade)";
+            $stmt_espec = $db->prepare($query_espec);
+            
+            $especs_inseridas = 0;
+            foreach ($especificacoes as $espec) {
+                if (!empty(trim($espec['valor']))) {
+                    $stmt_espec->execute([
+                        ':produto_id' => $produto_id,
+                        ':tipo' => $espec['tipo'],
+                        ':valor' => trim($espec['valor']),
+                        ':unidade' => $espec['unidade']
+                    ]);
+                    $especs_inseridas++;
+                }
+            }
+            
+            // Confirmar transação
+            $db->commit();
+            
+            $sucesso = "✅ Produto cadastrado com sucesso!" . 
+                      ($imagem_path ? " 📸 Imagem salva!" : "") . 
+                      ($especs_inseridas > 0 ? " 📊 $especs_inseridas especificação(ões) adicionada(s)!" : "");
+            
+        } catch (Exception $e) {
+            // Reverter transação em caso de erro
+            $db->rollBack();
+            throw $e;
+        }
         
     } catch (PDOException $e) {
         $erro_login = "❌ Erro ao cadastrar produto: " . $e->getMessage();
     }
 }
 
-// ✏️ CRUD - EDITAR PRODUTO
+// ✏️ CRUD - EDITAR PRODUTO (ESTRUTURA 3FN)
 if (isset($_POST['editar_produto']) && isset($_SESSION['admin_logado']) && $_SESSION['admin_logado']) {
     try {
         $produto_id = $_POST['id'];
@@ -157,7 +235,7 @@ if (isset($_POST['editar_produto']) && isset($_SESSION['admin_logado']) && $_SES
             }
         }
 
-        // GESTÃO DA MARCA - Verificar se a marca já existe (igual ao criar)
+        // GESTÃO DA MARCA - Verificar se a marca já existe
         $marca_nome = $_POST['marca'];
         $query_marca = "SELECT id FROM marcas WHERE nome = :nome";
         $checkMarca = $db->prepare($query_marca);
@@ -173,44 +251,82 @@ if (isset($_POST['editar_produto']) && isset($_SESSION['admin_logado']) && $_SES
             $marca_id = $db->lastInsertId();
         }
         
-        $dados = [
-            ':id' => $produto_id,
-            ':nome' => $_POST['nome'],
-            ':descricao' => $_POST['descricao'],
-            ':preco' => $_POST['preco'],
-            ':preco_original' => !empty($_POST['preco_original']) ? $_POST['preco_original'] : null,
-            ':estoque' => $_POST['estoque'],
-            ':categoria_id' => $_POST['categoria_id'],
-            ':marca_id' => $marca_id,
-            ':modelo' => $_POST['modelo'],
-            ':potencia' => $_POST['potencia'],
-            ':impedancia' => $_POST['impedancia'],
-            ':frequencia' => $_POST['frequencia'],
-            ':imagem' => $imagem_atual,
-            ':destaque' => isset($_POST['destaque']) ? 1 : 0
-        ];
+        // Iniciar transação
+        $db->beginTransaction();
         
-        $query = "UPDATE produtos SET
-                  nome = :nome, 
-                  descricao = :descricao, 
-                  preco = :preco, 
-                  preco_original = :preco_original, 
-                  estoque = :estoque, 
-                  categoria_id = :categoria_id, 
-                  marca_id = :marca_id, 
-                  modelo = :modelo, 
-                  potencia = :potencia, 
-                  impedancia = :impedancia, 
-                  frequencia = :frequencia, 
-                  imagem = :imagem,
-                  destaque = :destaque 
-                  WHERE id = :id";
-        
-        $stmt = $db->prepare($query);
-        $stmt->execute($dados);
-        
-        $sucesso = "✅ Produto atualizado com sucesso!";
-        $produto_editando = null; // Limpa o modo edição
+        try {
+            // Atualizar produto principal
+            $dados_produto = [
+                ':id' => $produto_id,
+                ':nome' => $_POST['nome'],
+                ':descricao' => $_POST['descricao'],
+                ':preco' => $_POST['preco'],
+                ':preco_original' => !empty($_POST['preco_original']) ? $_POST['preco_original'] : null,
+                ':estoque' => $_POST['estoque'],
+                ':categoria_id' => $_POST['categoria_id'],
+                ':marca_id' => $marca_id,
+                ':modelo' => $_POST['modelo'],
+                ':imagem' => $imagem_atual,
+                ':destaque' => isset($_POST['destaque']) ? 1 : 0
+            ];
+            
+$query_produto = "UPDATE produtos SET
+                    nome = :nome, 
+                    descricao = :descricao, 
+                    preco = :preco, 
+                    preco_original = :preco_original, 
+                    estoque = :estoque, 
+                    categoria_id = :categoria_id, 
+                    marca_id = :marca_id, 
+                    modelo = :modelo, 
+                    imagem = :imagem,
+                    destaque = :destaque 
+                    WHERE id = :id";
+            
+            $stmt_produto = $db->prepare($query_produto);
+            $stmt_produto->execute($dados_produto);
+            
+            // Atualizar especificações - primeiro remover as existentes
+            $query_delete_espec = "DELETE FROM especificacoes_produto WHERE produto_id = :produto_id";
+            $stmt_delete = $db->prepare($query_delete_espec);
+            $stmt_delete->execute([':produto_id' => $produto_id]);
+            
+            // Inserir novas especificações
+            $especificacoes = [
+                ['tipo' => 'potencia', 'valor' => $_POST['potencia'], 'unidade' => 'W'],
+                ['tipo' => 'impedancia', 'valor' => $_POST['impedancia'], 'unidade' => 'Ω'],
+                ['tipo' => 'frequencia', 'valor' => $_POST['frequencia'], 'unidade' => 'Hz']
+            ];
+            
+            $query_espec = "INSERT INTO especificacoes_produto (produto_id, tipo_especificacao, valor, unidade) 
+                           VALUES (:produto_id, :tipo, :valor, :unidade)";
+            $stmt_espec = $db->prepare($query_espec);
+            
+            $especs_inseridas = 0;
+            foreach ($especificacoes as $espec) {
+                if (!empty(trim($espec['valor']))) {
+                    $stmt_espec->execute([
+                        ':produto_id' => $produto_id,
+                        ':tipo' => $espec['tipo'],
+                        ':valor' => trim($espec['valor']),
+                        ':unidade' => $espec['unidade']
+                    ]);
+                    $especs_inseridas++;
+                }
+            }
+            
+            // Confirmar transação
+            $db->commit();
+            
+            $sucesso = "✅ Produto atualizado com sucesso!" . 
+                      ($especs_inseridas > 0 ? " 📊 $especs_inseridas especificação(ões) atualizada(s)!" : "");
+            $produto_editando = null; // Limpa o modo edição
+            
+        } catch (Exception $e) {
+            // Reverter transação em caso de erro
+            $db->rollBack();
+            throw $e;
+        }
         
     } catch (PDOException $e) {
         $erro_login = "❌ Erro ao editar produto: " . $e->getMessage();
@@ -242,6 +358,40 @@ if (isset($_POST['criar_marca']) && isset($_SESSION['admin_logado']) && $_SESSIO
         }
     } catch (PDOException $e) {
         $erro_login = "❌ Erro ao cadastrar marca: " . $e->getMessage();
+    }
+}
+
+// ✏️ CRUD - EDITAR MARCA
+if (isset($_POST['editar_marca']) && isset($_SESSION['admin_logado']) && $_SESSION['admin_logado']) {
+    try {
+        $marca_id = $_POST['id'];
+        $marca_nome = $_POST['nome_marca'];
+        
+        // Verificar se a marca já existe (excluindo a própria marca que está sendo editada)
+        $query_verificar = "SELECT id FROM marcas WHERE nome = :nome AND id != :id";
+        $stmt_verificar = $db->prepare($query_verificar);
+        $stmt_verificar->execute([
+            ':nome' => $marca_nome,
+            ':id' => $marca_id
+        ]);
+        
+        if ($stmt_verificar->rowCount() > 0) {
+            $erro_login = "❌ Esta marca já existe!";
+        } else {
+            // Atualizar marca
+            $query_editar = "UPDATE marcas SET nome = :nome, descricao = :descricao WHERE id = :id";
+            $stmt_editar = $db->prepare($query_editar);
+            $stmt_editar->execute([
+                ':nome' => $marca_nome,
+                ':descricao' => $_POST['descricao_marca'] ?? '',
+                ':id' => $marca_id
+            ]);
+            
+            $sucesso = "✅ Marca atualizada com sucesso!";
+            $marca_editando = null; // Limpa o modo edição
+        }
+    } catch (PDOException $e) {
+        $erro_login = "❌ Erro ao editar marca: " . $e->getMessage();
     }
 }
 
@@ -286,6 +436,12 @@ if (isset($_GET['deletar']) && isset($_SESSION['admin_logado']) && $_SESSION['ad
             unlink($produto['imagem']);
         }
         
+        // Deletar especificações do produto
+        $query_delete_espec = "DELETE FROM especificacoes_produto WHERE produto_id = :produto_id";
+        $stmt_delete_espec = $db->prepare($query_delete_espec);
+        $stmt_delete_espec->bindParam(':produto_id', $_GET['deletar']);
+        $stmt_delete_espec->execute();
+        
         // Deletar produto
         $query = "DELETE FROM produtos WHERE id = :id";
         $stmt = $db->prepare($query);
@@ -298,32 +454,46 @@ if (isset($_GET['deletar']) && isset($_SESSION['admin_logado']) && $_SESSION['ad
     }
 }
 
-// 📊 PROCESSAR FILTRO DE VENDAS
+// 📊 PROCESSAR FILTRO DE VENDAS (COM TABELA CLIENTES SEPARADA)
 $filtro_data_inicio = $_GET['data_inicio'] ?? '';
 $filtro_data_fim = $_GET['data_fim'] ?? '';
 $vendas_filtradas = [];
 
 if (isset($_GET['filtrar_vendas']) && isset($_SESSION['admin_logado']) && $_SESSION['admin_logado']) {
     try {
-        $query_vendas = "SELECT v.*, 
-                         COUNT(vi.id) as total_itens,
-                         SUM(vi.quantidade) as total_produtos
-                         FROM vendas v 
-                         LEFT JOIN venda_itens vi ON v.id = vi.venda_id";
+        // QUERY PRINCIPAL COM JOIN NA TABELA CLIENTES
+        $query_vendas = "SELECT 
+            v.id,
+            v.total,
+            v.status,
+            v.data_venda,
+            v.metodo_pagamento_id,
+            v.cliente_id,
+            c.nome as cliente_nome,
+            c.email as cliente_email, 
+            c.telefone as cliente_telefone,
+            c.endereco as cliente_endereco,
+            mp.nome as metodo_pagamento_nome,
+            COUNT(vi.id) as total_itens,
+            SUM(vi.quantidade) as total_produtos
+        FROM vendas v 
+        LEFT JOIN clientes c ON v.cliente_id = c.id
+        LEFT JOIN venda_itens vi ON v.id = vi.venda_id
+        LEFT JOIN metodos_pagamento mp ON v.metodo_pagamento_id = mp.id";
         
         $where_conditions = [];
         $params = [];
         
         // Filtro por data de início
         if (!empty($filtro_data_inicio)) {
-            $where_conditions[] = "v.data_venda >= :data_inicio";
-            $params[':data_inicio'] = $filtro_data_inicio . ' 00:00:00';
+            $where_conditions[] = "DATE(v.data_venda) >= :data_inicio";
+            $params[':data_inicio'] = $filtro_data_inicio;
         }
         
         // Filtro por data de fim
         if (!empty($filtro_data_fim)) {
-            $where_conditions[] = "v.data_venda <= :data_fim";
-            $params[':data_fim'] = $filtro_data_fim . ' 23:59:59';
+            $where_conditions[] = "DATE(v.data_venda) <= :data_fim";
+            $params[':data_fim'] = $filtro_data_fim;
         }
         
         // Adicionar WHERE se houver filtros
@@ -337,12 +507,15 @@ if (isset($_GET['filtrar_vendas']) && isset($_SESSION['admin_logado']) && $_SESS
         $stmt_vendas->execute($params);
         $vendas_filtradas = $stmt_vendas->fetchAll(PDO::FETCH_ASSOC);
         
+        error_log("Filtro aplicado: " . count($vendas_filtradas) . " vendas encontradas");
+        
     } catch (PDOException $e) {
         $erro_login = "❌ Erro ao buscar vendas: " . $e->getMessage();
+        error_log("ERRO FILTRO VENDAS: " . $e->getMessage());
     }
 }
 
-// 📈 ESTATÍSTICAS GERAIS
+// 📈 ESTATÍSTICAS GERAIS (ATUALIZADO)
 try {
     // Total de vendas
     $query_total_vendas = "SELECT COUNT(*) as total FROM vendas";
@@ -359,11 +532,24 @@ try {
     $stmt_hoje = $db->query($query_vendas_hoje);
     $vendas_hoje = $stmt_hoje->fetch(PDO::FETCH_ASSOC)['hoje'];
     
+    // Vendas do mês
+    $query_vendas_mes = "SELECT COUNT(*) as mes FROM vendas WHERE MONTH(data_venda) = MONTH(CURDATE()) AND YEAR(data_venda) = YEAR(CURDATE())";
+    $stmt_mes = $db->query($query_vendas_mes);
+    $vendas_mes = $stmt_mes->fetch(PDO::FETCH_ASSOC)['mes'];
+    
+    // Clientes cadastrados
+    $query_total_clientes = "SELECT COUNT(*) as total FROM clientes";
+    $stmt_clientes = $db->query($query_total_clientes);
+    $total_clientes = $stmt_clientes->fetch(PDO::FETCH_ASSOC)['total'];
+    
 } catch (PDOException $e) {
     // Não quebrar a página se houver erro nas estatísticas
     $total_vendas = 0;
     $valor_total = 0;
     $vendas_hoje = 0;
+    $vendas_mes = 0;
+    $total_clientes = 0;
+    error_log("ERRO ESTATÍSTICAS: " . $e->getMessage());
 }
 
 // 📋 BUSCAR MARCAS CADASTRADAS
@@ -494,10 +680,10 @@ try {
     
     /* ===== ESTILOS ESPECÍFICOS PARA FORMULÁRIOS ===== */
     .form-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1.5rem;
-        margin: 2rem 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem; /* Reduzi de 1.5rem para 1rem */
+    margin: 1.5rem 0; 
     }
 
     .full-width {
@@ -526,16 +712,16 @@ try {
     .form-group input,
     .form-group select,
     .form-group textarea {
-        padding: 1.2rem 1.5rem;
-        border: 2px solid #e1e8ed;
-        border-radius: 15px;
-        font-size: 1rem;
-        background: linear-gradient(135deg, #f8f9fa, #ffffff);
-        transition: all 0.4s ease;
-        font-family: inherit;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        position: relative;
-        z-index: 1;
+    padding: 0.5rem 1rem; /* Reduzi de 1.2rem 1.5rem para 0.8rem 1rem */
+    border: 2px solid #e1e8ed;
+    border-radius: 12px; /* Reduzi de 15px para 12px */
+    font-size: 0.9rem; /* Reduzi de 1rem para 0.9rem */
+    background: linear-gradient(135deg, #f8f9fa, #ffffff);
+    transition: all 0.4s ease;
+    font-family: inherit;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    position: relative;
+    z-index: 1;
     }
 
     .form-group input:focus,
@@ -1230,8 +1416,9 @@ try {
 .marca-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: 1rem;
+    gap: 1rem;
 }
 
 .marca-nome {
@@ -1261,6 +1448,12 @@ try {
 
 .marca-form .form-group {
     margin-bottom: 1.5rem;
+}
+
+.marca-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
 }
 </style>
     
@@ -1296,6 +1489,7 @@ try {
 
         <?php else: ?>
         <!-- ÁREA ADMINISTRATIVA -->
+         <progress max="50"> </progress>
 <div class="admin-section">
     <h1>🎯 Painel Administrativo</h1>
     <div class="welcome-text">
@@ -1339,7 +1533,7 @@ try {
             <label for="preco">Preço</label>
             <input type="number" name="preco" id="preco" step="0.01" 
                    value="<?php echo $produto_editando ? $produto_editando['preco'] : ''; ?>" 
-                   placeholder="R$ 299.90" required>
+                   placeholder="MT 299.90" required>
         </div>
         
         <div class="form-group">
@@ -1444,27 +1638,53 @@ try {
         <h2>🏷️ Gerenciar Marcas</h2>
         
         <div class="marcas-grid">
-            <!-- FORMULÁRIO PARA CADASTRAR NOVA MARCA -->
+            <!-- FORMULÁRIO PARA CADASTRAR/EDITAR MARCA -->
             <div class="marca-form">
-                <h3>➕ Cadastrar Nova Marca</h3>
+                <h3>
+                    <?php if($marca_editando): ?>
+                        ✏️ Editando Marca: <span style="color: #667eea;"><?php echo htmlspecialchars($marca_editando['nome']); ?></span>
+                    <?php else: ?>
+                        ➕ Cadastrar Nova Marca
+                    <?php endif; ?>
+                </h3>
+                
                 <form method="POST">
-                    <input type="hidden" name="criar_marca" value="true">
+                    <?php if($marca_editando): ?>
+                        <input type="hidden" name="editar_marca" value="true">
+                        <input type="hidden" name="id" value="<?php echo $marca_editando['id']; ?>">
+                    <?php else: ?>
+                        <input type="hidden" name="criar_marca" value="true">
+                    <?php endif; ?>
                     
                     <div class="form-group">
                         <label for="nome_marca">Nome da Marca</label>
                         <input type="text" name="nome_marca" id="nome_marca" 
+                               value="<?php echo $marca_editando ? htmlspecialchars($marca_editando['nome']) : ''; ?>" 
                                placeholder="Ex: Pioneer, JBL, Sony..." required>
                     </div>
                     
                     <div class="form-group">
                         <label for="descricao_marca">Descrição (Opcional)</label>
                         <textarea name="descricao_marca" id="descricao_marca" 
-                                  placeholder="Breve descrição sobre a marca..."></textarea>
+                                  placeholder="Breve descrição sobre a marca..."><?php echo $marca_editando ? htmlspecialchars($marca_editando['descricao']) : ''; ?></textarea>
                     </div>
                     
-                    <button type="submit" class="btn-submit" style="background: linear-gradient(135deg, #51cf66, #40c057);">
-                        💾 CADASTRAR MARCA
-                    </button>
+                    <div class="form-group" style="display: flex; gap: 1rem; margin-top: 1rem;">
+                        <?php if($marca_editando): ?>
+                            <button type="submit" class="btn-submit" style="flex: 1; background: linear-gradient(135deg, #51cf66, #40c057);">
+                                💾 ATUALIZAR MARCA
+                            </button>
+                            <a href="admin.php?cancelar_edicao_marca=true#gerenciarMarcas" 
+                               class="btn-submit" 
+                               style="flex: 1; background: linear-gradient(135deg, #6c757d, #495057); text-decoration: none; text-align: center; display: flex; align-items: center; justify-content: center;">
+                                ❌ CANCELAR
+                            </a>
+                        <?php else: ?>
+                            <button type="submit" class="btn-submit" style="background: linear-gradient(135deg, #51cf66, #40c057);">
+                                💾 CADASTRAR MARCA
+                            </button>
+                        <?php endif; ?>
+                    </div>
                 </form>
             </div>
 
@@ -1477,11 +1697,17 @@ try {
                         <div class="marca-card">
                             <div class="marca-header">
                                 <div class="marca-nome"><?php echo htmlspecialchars($marca['nome']); ?></div>
-                                <a href="admin.php?deletar_marca=<?php echo $marca['id']; ?>" 
-                                   class="action-link delete" 
-                                   onclick="return confirm('Tem certeza que deseja deletar esta marca?')">
-                                    🗑️
-                                </a>
+                                <div class="marca-actions">
+                                    <a href="admin.php?editar_marca=<?php echo $marca['id']; ?>#gerenciarMarcas" 
+                                       class="action-link edit">
+                                        ✏️ Editar
+                                    </a>
+                                    <a href="admin.php?deletar_marca=<?php echo $marca['id']; ?>" 
+                                       class="action-link delete" 
+                                       onclick="return confirm('Tem certeza que deseja deletar esta marca?')">
+                                        🗑️ Excluir
+                                    </a>
+                                </div>
                             </div>
                             
                             <?php if (!empty($marca['descricao'])): ?>
@@ -1490,7 +1716,9 @@ try {
                             
                             <div class="marca-info">
                                 <span>ID: <?php echo $marca['id']; ?></span>
-                                <span>Cadastro: <?php echo date('d/m/Y', strtotime($marca['created_at'])); ?></span>
+                                <?php if (isset($marca['created_at'])): ?>
+                                    <span>Cadastro: <?php echo date('d/m/Y', strtotime($marca['created_at'])); ?></span>
+                                <?php endif; ?>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -1538,7 +1766,7 @@ try {
                     <td><?php echo $produto['id']; ?></td>
                     <td><strong><?php echo $produto['nome']; ?></strong></td>
                     <td><?php echo $produto['marca_nome']; ?></td>
-                    <td>R$ <?php echo number_format($produto['preco'], 2, ',', '.'); ?></td>
+                    <td>MT <?php echo number_format($produto['preco'], 2, ',', '.'); ?></td>
                     <td><?php echo $produto['estoque']; ?></td>
                     <td><?php echo $produto['categoria_nome']; ?></td>
                     <td>
@@ -1562,23 +1790,27 @@ try {
         ?>
     </div>
 
-        <!-- SEÇÃO DE VENDAS REALIZADAS -->
+   <!-- SEÇÃO DE VENDAS REALIZADAS -->
 <div class="admin-section" id="vendas">
     <h2>💰 Relatório de Vendas</h2>
     
-    <!-- ESTATÍSTICAS -->
+    <!-- ESTATÍSTICAS ATUALIZADAS -->
     <div class="stats-grid">
         <div class="stat-card">
             <span class="stat-number"><?php echo $total_vendas; ?></span>
             <span class="stat-label">Total de Vendas</span>
         </div>
         <div class="stat-card total">
-            <span class="stat-number">R$ <?php echo number_format($valor_total, 2, ',', '.'); ?></span>
+            <span class="stat-number">MT <?php echo number_format($valor_total, 2, ',', '.'); ?></span>
             <span class="stat-label">Valor Total</span>
         </div>
         <div class="stat-card hoje">
             <span class="stat-number"><?php echo $vendas_hoje; ?></span>
             <span class="stat-label">Vendas Hoje</span>
+        </div>
+        <div class="stat-card" style="background: linear-gradient(135deg, #339af0, #228be6);">
+            <span class="stat-number"><?php echo $total_clientes; ?></span>
+            <span class="stat-label">Clientes Cadastrados</span>
         </div>
     </div>
 
@@ -1586,6 +1818,7 @@ try {
     <div class="filter-form">
         <h3 style="margin-bottom: 1.5rem; color: #2c3e50;">📅 Filtrar Vendas por Período</h3>
         <form method="GET" class="filter-grid">
+            <input type="hidden" name="filtrar_vendas" value="1">
             <div class="filter-group">
                 <label for="data_inicio">Data Início</label>
                 <input type="date" name="data_inicio" id="data_inicio" 
@@ -1596,32 +1829,35 @@ try {
                 <input type="date" name="data_fim" id="data_fim" 
                        value="<?php echo htmlspecialchars($filtro_data_fim); ?>">
             </div>
-            <button type="submit" name="filtrar_vendas" class="btn-filter">
+            <button type="submit" class="btn-filter">
                 🔍 Filtrar Vendas
             </button>
             <a href="admin.php#vendas" class="btn-clear">
                 🗑️ Limpar Filtro
             </a>
         </form>
+        
+        <?php if (!empty($filtro_data_inicio) || !empty($filtro_data_fim)): ?>
+            <div style="margin-top: 1rem; padding: 1rem; background: rgba(102, 126, 234, 0.1); border-radius: 8px;">
+                <strong>📊 Filtro Ativo:</strong>
+                <?php if (!empty($filtro_data_inicio)): ?>
+                    Desde <?php echo date('d/m/Y', strtotime($filtro_data_inicio)); ?>
+                <?php endif; ?>
+                <?php if (!empty($filtro_data_fim)): ?>
+                    até <?php echo date('d/m/Y', strtotime($filtro_data_fim)); ?>
+                <?php endif; ?>
+                <?php if (!empty($vendas_filtradas)): ?>
+                    - <strong><?php echo count($vendas_filtradas); ?> vendas encontradas</strong>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
     </div>
 
-    <!-- BOTÕES DE EXPORTAÇÃO -->
-    <div class="export-buttons">
-        <a href="exportar_vendas.php?tipo=pdf&data_inicio=<?php echo $filtro_data_inicio; ?>&data_fim=<?php echo $filtro_data_fim; ?>" 
-           class="btn-export" target="_blank">
-            📄 Exportar PDF
-        </a>
-        <a href="exportar_vendas.php?tipo=excel&data_inicio=<?php echo $filtro_data_inicio; ?>&data_fim=<?php echo $filtro_data_fim; ?>" 
-           class="btn-export" target="_blank">
-            📊 Exportar Excel
-        </a>
-    </div>
-
-    <!-- LISTA DE VENDAS -->
+    <!-- LISTA DE VENDAS CORRIGIDA -->
     <div class="vendas-lista">
         <h3 style="margin: 2rem 0 1rem 0; color: #2c3e50;">
             <?php if (!empty($filtro_data_inicio) || !empty($filtro_data_fim)): ?>
-                📋 Vendas Filtradas
+                📋 Vendas Filtradas (<?php echo count($vendas_filtradas); ?>)
             <?php else: ?>
                 📋 Últimas Vendas
             <?php endif; ?>
@@ -1641,7 +1877,14 @@ try {
             <?php foreach ($vendas_filtradas as $venda): ?>
                 <div class="venda-item">
                     <div class="venda-header">
-                        <div class="venda-id">Venda #<?php echo str_pad($venda['id'], 6, '0', STR_PAD_LEFT); ?></div>
+                        <div class="venda-id">
+                            Venda #<?php echo str_pad($venda['id'], 6, '0', STR_PAD_LEFT); ?>
+                            <?php if (!empty($venda['metodo_pagamento_nome'])): ?>
+                                <small style="color: #666; margin-left: 1rem;">
+                                    💳 <?php echo $venda['metodo_pagamento_nome']; ?>
+                                </small>
+                            <?php endif; ?>
+                        </div>
                         <div class="venda-data">
                             📅 <?php echo date('d/m/Y H:i', strtotime($venda['data_venda'])); ?>
                         </div>
@@ -1652,30 +1895,47 @@ try {
                         <?php echo htmlspecialchars($venda['cliente_nome']); ?> | 
                         <?php echo htmlspecialchars($venda['cliente_email']); ?> | 
                         📞 <?php echo htmlspecialchars($venda['cliente_telefone']); ?>
+                        <?php if (!empty($venda['cliente_endereco'])): ?>
+                            | 📍 <?php echo htmlspecialchars($venda['cliente_endereco']); ?>
+                        <?php endif; ?>
                     </div>
 
+                    <!-- ITENS DA VENDA -->
                     <div class="venda-detalhes">
-            <div>
-                <strong>📦 Itens da Venda:</strong>
-                <div class="venda-itens">
-                    <?php
-        // Buscar itens desta venda
-        try {
-            $query_itens = "SELECT * FROM venda_itens WHERE venda_id = :venda_id";
-            $stmt_itens = $db->prepare($query_itens);
-            $stmt_itens->bindValue(':venda_id', $venda['id']);
-            $stmt_itens->execute();
-            $itens = $stmt_itens->fetchAll(PDO::FETCH_ASSOC);
-                        
-                                    foreach ($itens as $item):
-            ?>
-            <div class="item-venda">
-                <span><?php echo htmlspecialchars($item['produto_nome']); ?></span>
-                <span><?php echo $item['quantidade']; ?> x R$ <?php echo number_format($item['preco_unitario'], 2, ',', '.'); ?></span>
-                <span><strong>R$ <?php echo number_format($item['subtotal'], 2, ',', '.'); ?></strong></span>
-            </div>
-            <?php endforeach; ?>
-        </div>
+                        <div style="grid-column: 1 / -1;">
+                            <strong>📦 Itens da Venda:</strong>
+                            <div class="venda-itens">
+                                <?php
+                                // Buscar itens desta venda específica
+                                try {
+                                    $query_itens = "SELECT * FROM venda_itens WHERE venda_id = :venda_id";
+                                    $stmt_itens = $db->prepare($query_itens);
+                                    $stmt_itens->bindValue(':venda_id', $venda['id']);
+                                    $stmt_itens->execute();
+                                    $itens = $stmt_itens->fetchAll(PDO::FETCH_ASSOC);
+                                    
+                                    if (count($itens) > 0):
+                                        foreach ($itens as $item):
+                                ?>
+                                <div class="item-venda">
+                                    <span><?php echo htmlspecialchars($item['produto_nome']); ?></span>
+                                    <span><?php echo $item['quantidade']; ?> x MT <?php echo number_format($item['preco_unitario'], 2, ',', '.'); ?></span>
+                                    <span><strong>MT <?php echo number_format($item['subtotal'], 2, ',', '.'); ?></strong></span>
+                                </div>
+                                <?php 
+                                        endforeach;
+                                    else:
+                                ?>
+                                <div style="padding: 1rem; text-align: center; color: #666;">
+                                    Nenhum item encontrado para esta venda
+                                </div>
+                                <?php
+                                    endif;
+                                } catch (PDOException $e) {
+                                    echo "<div style='color: #dc3545; padding: 1rem;'>Erro ao carregar itens: " . $e->getMessage() . "</div>";
+                                }
+                                ?>
+                            </div>
                         </div>
                         
                         <div>
@@ -1691,13 +1951,8 @@ try {
                         </div>
                         
                         <div class="venda-total">
-                            Total: R$ <?php echo number_format($venda['total'], 2, ',', '.'); ?>
+                            Total: MT <?php echo number_format($venda['total'], 2, ',', '.'); ?>
                         </div>
-                        <?php
-                                } catch (PDOException $e) {
-                                    echo "<div style='color: #dc3545;'>Erro ao carregar itens</div>";
-                                }
-                        ?>
                     </div>
                 </div>
             <?php endforeach; ?>
@@ -1705,6 +1960,7 @@ try {
     </div>
 </div>
 </div>
+
  <?php endif; ?>
 </body>
 </html>

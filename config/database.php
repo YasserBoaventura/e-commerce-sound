@@ -4,7 +4,7 @@ class Database {
     private $db_name = "loja_som_automotivo";
     private $username = "root";
     private $password = "Boaventura";
-    public $conn;
+    public $conn;   
     public $error;
 
     public function getConnection() {

@@ -242,11 +242,20 @@ function finalizarVenda() {
     }
     
     const formData = new FormData(form);
+    
+    // Validar método de pagamento
+    const metodoPagamentoSelecionado = document.querySelector('input[name="metodo_pagamento"]:checked');
+    if (!metodoPagamentoSelecionado) {
+        alert('❌ Selecione um método de pagamento!');
+        return;
+    }
+    
     console.log('📝 Dados do formulário:', {
         nome: formData.get('nome'),
         email: formData.get('email'),
         telefone: formData.get('telefone'),
-        endereco: formData.get('endereco')
+        endereco: formData.get('endereco'),
+        metodo_pagamento: metodoPagamentoSelecionado.value
     });
     
     // Validar formulário
@@ -262,6 +271,7 @@ function finalizarVenda() {
         return;
     }
 
+    // ESTRUTURA CORRETA para o PHP
     const dadosVenda = {
         cliente: {
             nome: formData.get('nome'),
@@ -269,8 +279,14 @@ function finalizarVenda() {
             telefone: formData.get('telefone'),
             endereco: formData.get('endereco')
         },
-        itens: carrinho,
-        total: carrinho.reduce((total, item) => total + parseFloat(item.subtotal), 0)
+        metodo_pagamento: metodoPagamentoSelecionado.value,
+        carrinho: carrinho.map(item => ({
+            id: item.id,
+            nome: item.nome,
+            preco: parseFloat(item.preco),
+            quantidade: parseInt(item.quantidade),
+            subtotal: parseFloat(item.subtotal)
+        }))
     };
 
     console.log('📤 Dados que serão enviados:', dadosVenda);
@@ -304,35 +320,49 @@ function finalizarVenda() {
     })
     .then(response => {
         console.log('📨 Resposta recebida. Status:', response.status);
-        console.log('📨 Headers:', response.headers);
-        return response.json();
-    })
-    .then(data => {
-        console.log('✅ Resposta do servidor:', data);
         
-        if (data.success) {
-            alert(`🎉 Pedido finalizado com sucesso!\n\n📋 Nº do Pedido: #${data.venda_id}\n💰 Total: R$ ${dadosVenda.total.toFixed(2)}\n\nObrigado pela compra!`);
+        // Primeiro ler como texto para debug
+        return response.text().then(text => {
+            console.log('📨 Resposta completa (texto):', text);
             
-            // Limpar carrinho
-            carrinho = [];
-            salvarCarrinho();
-            atualizarCarrinhoFlutuante();
-            
-            const modalFinalizar = document.getElementById('modalFinalizar');
-            if (modalFinalizar) {
-                modalFinalizar.style.display = 'none';
+            // Tentar parsear como JSON
+            try {
+                const data = JSON.parse(text);
+                return { success: true, data: data };
+            } catch (e) {
+                console.error('❌ Resposta não é JSON válido:', text);
+                throw new Error('Resposta do servidor não é JSON válido');
             }
+        });
+    })
+    .then(result => {
+        if (result.success) {
+            console.log('✅ Resposta do servidor:', result.data);
             
-            form.reset();
-        } else {
-            alert('❌ Erro ao finalizar pedido: ' + data.message);
+            if (result.data.success) {
+                alert(`🎉 Pedido finalizado com sucesso!\n\n📋 Nº do Pedido: #${result.data.venda_id}\n💰 Total: R$ ${result.data.total}\n💳 Método: ${result.data.metodo_pagamento}\n\nObrigado pela compra!`);
+                
+                // Limpar carrinho
+                carrinho = [];
+                salvarCarrinho();
+                atualizarCarrinhoFlutuante();
+                
+                const modalFinalizar = document.getElementById('modalFinalizar');
+                if (modalFinalizar) {
+                    modalFinalizar.style.display = 'none';
+                }
+                
+                form.reset();
+            } else {
+                alert('❌ Erro ao finalizar pedido: ' + result.data.message);
+            }
         }
     })
     .catch(error => {
         console.error('❌ Erro na requisição:', error);
         console.error('❌ Tipo do erro:', error.name);
         console.error('❌ Mensagem:', error.message);
-        alert('❌ Erro de conexão. Verifique o console (F12) para mais detalhes.');
+        alert('❌ Erro ao processar pedido: ' + error.message);
     })
     .finally(() => {
         // Restaurar botão
